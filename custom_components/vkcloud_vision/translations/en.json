@@ -16,14 +16,24 @@
           "client_id": "Client ID",
           "client_secret": "Client secret"
         }
+      },
+      "reauth_confirm": {
+        "title": "Reconfigure VK Cloud Vision",
+        "description": "Enter your [VK Cloud Vision API credentials]({obtain_token_url}).",
+        "data": {
+          "client_id": "Client ID",
+          "client_secret": "Client secret"
+        }
       }
     },
     "error": {
-      "invalid_auth": "Authentication failed"
+      "invalid_auth": "Authentication failed",
+      "cannot_connect": "Could not connect to VK Cloud."
     },
     "abort": {
       "already_configured": "VK Cloud Vision is already configured",
-      "reconfigure_successful": "Credentials updated successfully"
+      "reconfigure_successful": "Credentials updated successfully",
+      "reauth_successful": "Credentials updated."
     }
   },
   "options": {
@@ -133,6 +143,10 @@
         "max_retries": {
           "name": "Maximum Retries",
           "description": "Number of retry attempts for API requests in case of timeouts or temporary errors. Defaults to 3."
+        },
+        "snapshot_index": {
+          "name": "Snapshot to save",
+          "description": "One-based frame number in the burst. Used for the saved image and its annotations."
         }
       }
     },

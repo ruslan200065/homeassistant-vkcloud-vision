@@ -24,6 +24,7 @@ ATTR_LANG = "lang"
 ATTR_FILE_OUT = "file_out"
 ATTR_BOUNDING_BOXES = "bounding_boxes"
 ATTR_NUM_SNAPSHOTS = "num_snapshots"
+ATTR_SNAPSHOT_INDEX = "snapshot_index"
 ATTR_SNAPSHOT_INTERVAL_SEC = "snapshot_interval_sec"
 ATTR_MAX_RETRIES = "max_retries"
 ATTR_SPACE = "space"
@@ -48,7 +49,7 @@ DEFAULT_CONFIDENCE_THRESHOLD = 0.1
 DEFAULT_OBJECT_BOUNDING_BOXES = "rus"
 DEFAULT_FACE_BOUNDING_BOXES = "alias"
 DEFAULT_NUM_SNAPSHOTS = 1
-DEFAULT_SNAPSHOT_INTERVAL_SEC = .5
+DEFAULT_SNAPSHOT_INTERVAL_SEC = 0.5
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_SPACE = 0
 DEFAULT_CREATE_NEW = False
@@ -75,6 +76,7 @@ SERVICE_RECOGNIZE_FACES = "recognize_faces"
 
 class BoundingBoxesType(StrEnum):
     """Bounding boxes display options."""
+
     NONE = "none"
     NO_LABELS = "no_labels"
     RUS = "rus"
@@ -85,6 +87,7 @@ class BoundingBoxesType(StrEnum):
 
 class ResponseType(StrEnum):
     """Response types for VK Cloud Vision services."""
+
     ACTION_DONE = "action_done"
     ERROR = "error"
     PARTIAL_ACTION_DONE = "partial_action_done"

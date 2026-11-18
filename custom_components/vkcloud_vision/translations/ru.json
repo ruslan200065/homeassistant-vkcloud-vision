@@ -16,14 +16,24 @@
           "client_id": "Идентификатор клиента",
           "client_secret": "Секретный ключ"
         }
+      },
+      "reauth_confirm": {
+        "title": "Перенастройка VK Cloud Vision",
+        "description": "Введите [данные для доступа к API VK Cloud Vision]({obtain_token_url}).",
+        "data": {
+          "client_id": "Идентификатор клиента",
+          "client_secret": "Секретный ключ"
+        }
       }
     },
     "error": {
-      "invalid_auth": "Ошибка аутентификации"
+      "invalid_auth": "Ошибка аутентификации",
+      "cannot_connect": "Не удалось подключиться к VK Cloud."
     },
     "abort": {
       "already_configured": "VK Cloud Vision уже настроен",
-      "reconfigure_successful": "Учетные данные успешно обновлены"
+      "reconfigure_successful": "Учетные данные успешно обновлены",
+      "reauth_successful": "Учётные данные обновлены."
     }
   },
   "options": {
@@ -136,6 +146,10 @@
         "max_retries": {
           "name": "Максимальное количество попыток",
           "description": "Количество попыток повторного выполнения запросов к API в случае таймаутов или временных ошибок. По умолчанию 3."
+        },
+        "snapshot_index": {
+          "name": "Сохраняемый кадр",
+          "description": "Номер кадра в серии, начиная с 1. Используется для сохранения и разметки файла."
         }
       }
     },

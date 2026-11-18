@@ -7,16 +7,26 @@
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional, cast
+from typing import Any
 
-from aiohttp import ClientSession, ClientTimeout, FormData
+from aiohttp import (
+    ClientConnectionError,
+    ClientError,
+    ClientSession,
+    ClientTimeout,
+    FormData,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.util.json import JsonObjectType, JsonValueType
+from homeassistant.util.json import JsonObjectType
 
 from ..auth import VKCloudAuth
-from ..exceptions import (VKCloudVisionAPIError, VKCloudVisionAuthError,
-                          VKCloudVisionDetectionError)
+from ..exceptions import (
+    VKCloudVisionAPIError,
+    VKCloudVisionAuthError,
+    VKCloudVisionDetectionError,
+    VKCloudVisionDetectionStatus,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,10 +50,12 @@ class VKCloudVisionBaseClient:
     async def _make_request(
         self,
         endpoint: str,
-        meta: Dict[str, Any],
-        files: Optional[List[bytes]] = None,
-        params: Optional[Dict[str, Any]] = None,
+        meta: dict[str, Any],
+        files: list[bytes] | None = None,
+        params: dict[str, Any] | None = None,
         max_retries: int = 3,
+        *,
+        allow_partial: bool = True,
     ) -> JsonObjectType:
         """Make an API request with multipart/form-data."""
         access_token = await self._auth.get_access_token()
@@ -59,9 +71,13 @@ class VKCloudVisionBaseClient:
         if params:
             query_params.update(params)
 
-        return await self._execute_request_with_retries(url, query_params, meta, files, max_retries)
+        return await self._execute_request_with_retries(
+            url, query_params, meta, files, max_retries, allow_partial
+        )
 
-    def _prepare_form_data(self, meta: Dict[str, Any], files: Optional[List[bytes]]) -> FormData:
+    def _prepare_form_data(
+        self, meta: dict[str, Any], files: list[bytes] | None
+    ) -> FormData:
         """Prepare multipart form data for the request using file names from meta."""
 
         data = FormData(default_to_multipart=True)
@@ -91,111 +107,115 @@ class VKCloudVisionBaseClient:
         return data
 
     async def _execute_request(
-        self, url: str, query_params: Dict[str, Any], data: FormData
+        self,
+        url: str,
+        query_params: dict[str, Any],
+        data: FormData,
+        allow_partial: bool,
     ) -> JsonObjectType:
         """Execute single request attempt."""
         async with self._session.post(
-            url, params=query_params, data=data, timeout=ClientTimeout(total=DEFAULT_TIMEOUT)
+            url,
+            params=query_params,
+            data=data,
+            allow_redirects=False,
+            timeout=ClientTimeout(total=DEFAULT_TIMEOUT),
         ) as response:
-            # Handle HTTP status codes
-            if response.status >= 502 and response.status <= 504:
-                _LOGGER.warning("Received HTTP %d, retrying", response.status)
-                raise TimeoutError("Server timeout or gateway error")
-
-            if response.status >= 400:
-                error_text = await response.text()
+            if response.status in (408, 429, 500, 502, 503, 504):
+                raise TimeoutError(f"VK Cloud Vision returned HTTP {response.status}")
+            if response.status in (401, 403):
+                raise VKCloudVisionAuthError(
+                    "VK Cloud Vision rejected the credentials", response.status
+                )
+            if response.status >= 300:
                 raise VKCloudVisionAPIError(
-                    message=f"API error: HTTP {response.status}",
-                    http_status=response.status,
-                    error_details=error_text,
+                    "VK Cloud Vision request failed", response.status
                 )
 
-            # Parse JSON response
             try:
                 result = await response.json()
-            except ValueError as err:
+            except (ValueError, ClientError) as err:
+                raise VKCloudVisionAPIError("Invalid JSON response") from err
+
+            if not isinstance(result, dict):
+                raise VKCloudVisionAPIError("Invalid response envelope")
+            if result.get("status") != 200:
                 raise VKCloudVisionAPIError(
-                    message="Invalid JSON response",
-                    http_status=response.status,
-                    error_details=str(err),
+                    "VK Cloud Vision returned an API error",
+                    api_status=result.get("status"),
                 )
 
-            # Check if body is present
-            try:
-                response_body: JsonObjectType = result["body"]
-            except KeyError as err:
-                raise VKCloudVisionAPIError(
-                    message="No response body",
-                    http_status=response.status,
-                    error_details=str(err),
+            body = result.get("body")
+            if not isinstance(body, dict):
+                raise VKCloudVisionAPIError("Missing or invalid response body")
+
+            results = []
+            for mode, images in body.items():
+                # Management endpoints can return metadata alongside image results.
+                if not isinstance(images, list):
+                    continue
+                for image in images:
+                    if not isinstance(image, dict):
+                        raise VKCloudVisionAPIError("Invalid image result")
+                    results.append((mode, image))
+
+            # Keep successful results even when another mode or image failed.
+            failed = [
+                (mode, image) for mode, image in results if image.get("status", 0) != 0
+            ]
+            if failed and (not allow_partial or len(failed) == len(results)):
+                mode, image = next(
+                    (
+                        (mode, image)
+                        for mode, image in failed
+                        if image.get("status") != 2
+                    ),
+                    failed[0],
                 )
-
-            # Check API status
-            api_status = result.get("status")
-            if api_status != 200:
-                raise VKCloudVisionAPIError(
-                    message="API returned non-200 status",
-                    http_status=response.status,
-                    api_status=api_status,
-                    error_details=str(result["body"]),
+                status = image.get("status")
+                if status not in (1, 2):
+                    raise VKCloudVisionAPIError("Unknown image processing status")
+                raise VKCloudVisionDetectionError(
+                    mode, str(image.get("name", "unknown")), status
                 )
-
-            # Check for image errors
-            for mode, result in response_body.items():
-                images = cast(List[dict[str, JsonValueType]], result)
-                failed_images = [img for img in images if img.get("status", 0) != 0]
-                image_names = {str(image.get("name")) for image in images}
-
-                # Single image and it failed in one of the modes (e.g. object2 failed but object succeeded)
-                if len(image_names) == 1 and len(failed_images) > 0:
-                    image = failed_images[0]
-                    raise VKCloudVisionDetectionError(
-                        mode=mode,
-                        image_name=cast(str, image.get("name", "unknown")),
-                        detection_status=cast(int, image.get("status", 0)),
-                        error_details=image.get("error", "unknown error"),
-                    )
-
-                # Multiple images, all failed
-                if len(failed_images) == len(images):
-                    image = failed_images[0]
-                    raise VKCloudVisionDetectionError(
-                        mode=mode,
-                        image_name=cast(str, image.get("name", "unknown")),
-                        detection_status=cast(int, image.get("status", 0)),
-                        error_details=image.get("error", "unknown error"),
-                    )
-
-            return response_body
+            return body
 
     async def _execute_request_with_retries(
         self,
         url: str,
-        query_params: Dict[str, Any],
-        meta: Dict[str, Any],
-        files: Optional[List[bytes]],
-        max_retries: int
-    ) -> Dict[str, Any]:
-        """Execute request with retry logic."""
-        last_error = None
-
-        for attempt in range(max_retries):
+        query_params: dict[str, Any],
+        meta: dict[str, Any],
+        files: list[bytes] | None,
+        max_retries: int,
+        allow_partial: bool,
+    ) -> JsonObjectType:
+        """Retry temporary failures with bounded backoff."""
+        for attempt in range(1, max_retries + 1):
             data = self._prepare_form_data(meta, files)
             try:
-                return await self._execute_request(url, query_params, data)
-            except TimeoutError as err:
-                last_error = err
-                _LOGGER.warning("Timeout occurred on attempt %d/%d", attempt + 1, max_retries)
-            # VK Cloud support suggested adding retry logic to deal with
-            # temporary object detection errors 🤷‍♂️ (ticket #2025060200475)
+                return await self._execute_request(
+                    url, query_params, data, allow_partial
+                )
             except VKCloudVisionDetectionError as err:
-                last_error = err
-                _LOGGER.info(f"{err.message} occurred on attempt %d/%d", attempt + 1, max_retries)
-
-            # Exponential backoff
-            await asyncio.sleep(RETRY_DELAY * (2 ** attempt))
-
-        raise VKCloudVisionAPIError(
-            message=f"Failed after {max_retries} attempts",
-            error_details=str(last_error),
-        )
+                if (
+                    err.detection_status
+                    is not VKCloudVisionDetectionStatus.TEMPORARY_ERROR
+                    or attempt == max_retries
+                ):
+                    raise
+            except (TimeoutError, ClientConnectionError):
+                if attempt == max_retries:
+                    raise VKCloudVisionAPIError(
+                        f"VK Cloud Vision unavailable after {attempt} attempt(s)"
+                    ) from None
+            except ClientError:
+                raise VKCloudVisionAPIError(
+                    "Unable to contact VK Cloud Vision"
+                ) from None
+            _LOGGER.debug(
+                "Retrying VK Cloud Vision request after attempt %d/%d",
+                attempt,
+                max_retries,
+            )
+            await asyncio.sleep(min(RETRY_DELAY * 2 ** (attempt - 1), 8))
+        raise ValueError("max_retries must be positive")

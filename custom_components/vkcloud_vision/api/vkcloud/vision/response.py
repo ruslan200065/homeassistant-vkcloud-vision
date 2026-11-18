@@ -4,9 +4,22 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-from typing import List, cast
+from typing import cast
 
 from homeassistant.util.json import JsonObjectType, JsonValueType
+
+from ..exceptions import VKCloudVisionAPIError
+
+
+def _result_items(value: JsonValueType, field: str) -> list[JsonObjectType]:
+    """Validate a list of objects returned by Vision."""
+    if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+        raise VKCloudVisionAPIError(f"Invalid VK Cloud Vision field: {field}")
+    return cast(list[JsonObjectType], value)
+
+
+def _passes_threshold(value: JsonValueType, threshold: float) -> bool:
+    return isinstance(value, (int, float)) and value >= threshold
 
 
 class VKCloudVisionObjectDetectionResponse:
@@ -14,15 +27,14 @@ class VKCloudVisionObjectDetectionResponse:
 
     def __init__(self, raw_response: JsonObjectType, prob_threshold: float = 0.1):
         """Initialize with API response."""
-        self._errors: List[str] = []
-        self._labels: list[JsonObjectType] = []
+        self._errors: list[str] = []
         self._prob_threshold = prob_threshold
         self._data = self._process_response(raw_response)
 
     @property
     def data(self) -> JsonObjectType:
         """Return the processed API response data."""
-        return self._data
+        return cast(JsonObjectType, self._data)
 
     @property
     def has_errors(self) -> bool:
@@ -34,20 +46,26 @@ class VKCloudVisionObjectDetectionResponse:
         """Return concatenated error message or None if no errors."""
         return "; ".join(self._errors) if self._errors else None
 
-    @property
-    def labels(self) -> list[JsonObjectType]:
-        """Return extracted labels for the first snapshot."""
-        return self._labels
+    def labels_for_image(self, name: str) -> list[JsonObjectType]:
+        """Return labels for the requested image across successful modes."""
+        return [
+            label
+            for images in self._data.values()
+            for image in images
+            if image.get("name") == name and image.get("status", 0) == 0
+            for label in cast(list[JsonObjectType], image.get("labels", []))
+        ]
 
-    def _process_response(self, response: JsonObjectType) -> JsonObjectType:
+    def _process_response(
+        self, response: JsonObjectType
+    ) -> dict[str, list[JsonObjectType]]:
         """Process and filter API response."""
         processed = {}
         for mode, result in response.items():
             processed[mode] = []
-            first_image = True
-            for image in cast(List[dict[str, JsonValueType]], result):
+            for image in _result_items(result, mode):
                 image_name = image.get("name", "unknown")
-                status = image.get("status", 1)
+                status = image.get("status", 0)
 
                 if status != 0:
                     error = image.get("error", "unknown error")
@@ -56,14 +74,10 @@ class VKCloudVisionObjectDetectionResponse:
                 processed_image = image.copy()
                 if "labels" in image:
                     processed_image["labels"] = [
-                        label for label in cast(list[JsonValueType], image["labels"])
-                        if cast(dict, label).get("prob", 0) >= self._prob_threshold
+                        label
+                        for label in _result_items(image["labels"], "labels")
+                        if _passes_threshold(label.get("prob", 0), self._prob_threshold)
                     ]
-
-                    # FIXME: Proper parsing of multiple snapshot labels (good enough for now)
-                    if first_image and len(processed_image["labels"]) > 0:
-                        self._labels.extend(cast(list[JsonObjectType], processed_image["labels"]))
-                        first_image = False
 
                 processed[mode].append(processed_image)
 
@@ -73,7 +87,12 @@ class VKCloudVisionObjectDetectionResponse:
 class VKCloudVisionFaceRecognitionResponse:
     """Parse response from /v1/persons/recognize."""
 
-    def __init__(self, raw_response: dict, confidence_threshold: float = 0.1, tag_to_alias_map: dict | None = None):
+    def __init__(
+        self,
+        raw_response: dict,
+        confidence_threshold: float = 0.1,
+        tag_to_alias_map: dict | None = None,
+    ):
         self._persons: list[dict] = []
         self._aliases_changed: bool = False
         self._errors: list[str] = []
@@ -106,26 +125,33 @@ class VKCloudVisionFaceRecognitionResponse:
         return "; ".join(self._errors) if self._errors else None
 
     def _parse_persons(self, response: JsonObjectType) -> None:
-        objects = response.get("objects", [])
+        objects = _result_items(response.get("objects", []), "objects")
         self._aliases_changed = cast(bool, response.get("aliases_changed", False))
 
         if not objects:
             return
 
         # We only handle a single image per request
-        obj = cast(List[dict], objects)[0]
+        obj = objects[0]
         status = obj.get("status", 0)
         if status != 0:
-            self._errors.append(f"{obj.get('name', 'unknown')}: {obj.get('error', 'unknown')}")
+            self._errors.append(
+                f"{obj.get('name', 'unknown')}: {obj.get('error', 'unknown')}"
+            )
 
         self._persons = []
-        for person in obj.get("persons", []):
-            if person.get("confidence", 0) < self._confidence_threshold:
+        for person in _result_items(obj.get("persons", []), "persons"):
+            if not _passes_threshold(
+                person.get("confidence", 0), self._confidence_threshold
+            ):
                 continue
 
-            tag = person.get("tag", "undefined")
-            person["alias"] = self._tag_to_alias_map.get(tag, tag)
-            self._persons.append(person)
+            tag = person.get("tag")
+            if not isinstance(tag, str):
+                tag = "undefined"
+            self._persons.append(
+                {**person, "alias": self._tag_to_alias_map.get(tag, tag)}
+            )
 
 
 class VKCloudVisionTextRecognitionResponse:
@@ -144,14 +170,14 @@ class VKCloudVisionTextRecognitionResponse:
     @property
     def words(self) -> list[dict]:
         """Return raw words array for the first image."""
-        if self._objects and len(self._objects) > 0:
+        if self._objects:
             return self._objects[0].get("words", [])
         return []
 
     @property
     def text(self) -> str | None:
         """Return joined text string for the first image (backward compatible)."""
-        if self._objects and len(self._objects) > 0:
+        if self._objects:
             return self._objects[0].get("text", "")
         return None
 
@@ -165,20 +191,24 @@ class VKCloudVisionTextRecognitionResponse:
 
     def _parse_response(self, response: JsonObjectType) -> None:
         """Parse text recognition response objects."""
-        objects = response.get("objects", [])
+        objects = _result_items(response.get("objects", []), "objects")
         if not objects:
             return
 
-        for obj in cast(List[dict], objects):
+        for obj in objects:
             status = obj.get("status", 0)
             name = obj.get("name", "unknown")
             if status != 0:
                 self._errors.append(f"{name}: {obj.get('error', 'unknown error')}")
 
-            words = obj.get("words", [])
+            words = _result_items(obj.get("words", []), "words")
 
             # Generate backward-compatible text by joining word["text"] with newlines
-            text = "\n".join([word.get("text", "") for word in words if "text" in word])
+            text = "\n".join(
+                word_text
+                for word in words
+                if isinstance(word_text := word.get("text"), str)
+            )
 
             processed_obj = obj.copy()
             processed_obj["words"] = words

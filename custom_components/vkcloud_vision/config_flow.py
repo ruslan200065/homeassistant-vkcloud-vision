@@ -8,24 +8,51 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import data_entry_flow
 from homeassistant.components.file_upload import process_uploaded_file
-from homeassistant.config_entries import (ConfigEntry, ConfigFlow,
-                                          ConfigFlowResult, OptionsFlow)
-from homeassistant.helpers.selector import (FileSelector, FileSelectorConfig,
-                                            NumberSelector,
-                                            NumberSelectorConfig,
-                                            NumberSelectorMode, ObjectSelector,
-                                            ObjectSelectorConfig, TextSelector)
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
+from homeassistant.helpers.selector import (
+    FileSelector,
+    FileSelectorConfig,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    ObjectSelector,
+    ObjectSelectorConfig,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 
 from .api.vkcloud.auth import VKCloudAuth
+from .api.vkcloud.exceptions import VKCloudVisionAPIError, VKCloudVisionAuthError
 from .api.vkcloud.vision import VKCloudVision
-from .const import (CONF_ALIAS, CONF_CLIENT_ID, CONF_CLIENT_SECRET,
-                    CONF_CONFIRM_DELETE, CONF_CONFIRM_TRUNCATE,
-                    CONF_CREATE_NEW, CONF_DELETE_PERSON_SPACE,
-                    CONF_PERSON_ALIASES, CONF_PERSON_IDS, CONF_PHOTO,
-                    CONF_REFRESH_TOKEN, CONF_SPACE, CONF_TRUNCATE_SPACE,
-                    CONF_UPDATE_EMBEDDING, DEFAULT_CREATE_NEW, DEFAULT_SPACE,
-                    DEFAULT_UPDATE_EMBEDDING, DOMAIN, LOGGER,
-                    SECTION_PERSON_ALIASES, SECTION_TRAINING_MODE)
+from .const import (
+    CONF_ALIAS,
+    CONF_CLIENT_ID,
+    CONF_CLIENT_SECRET,
+    CONF_CONFIRM_DELETE,
+    CONF_CONFIRM_TRUNCATE,
+    CONF_CREATE_NEW,
+    CONF_DELETE_PERSON_SPACE,
+    CONF_PERSON_ALIASES,
+    CONF_PERSON_IDS,
+    CONF_PHOTO,
+    CONF_REFRESH_TOKEN,
+    CONF_SPACE,
+    CONF_TRUNCATE_SPACE,
+    CONF_UPDATE_EMBEDDING,
+    DEFAULT_CREATE_NEW,
+    DEFAULT_SPACE,
+    DEFAULT_UPDATE_EMBEDDING,
+    DOMAIN,
+    LOGGER,
+    SECTION_PERSON_ALIASES,
+    SECTION_TRAINING_MODE,
+)
 
 
 class VKCloudVisionConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -33,105 +60,75 @@ class VKCloudVisionConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 4
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle the initial step (OAuth only for new users)."""
-        errors: dict[str, str] = {}
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Connect a new VK Cloud account."""
+        return await self._async_credentials_form("user", user_input)
 
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Replace the credentials for an existing account."""
+        return await self._async_credentials_form(
+            "reconfigure", user_input, self._get_reconfigure_entry()
+        )
+
+    async def async_step_reauth(self, _entry_data: Mapping[str, Any]) -> ConfigFlowResult:
+        """Start a credential update after an authentication failure."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Accept new credentials for the existing account."""
+        return await self._async_credentials_form(
+            "reauth_confirm", user_input, self._get_reauth_entry()
+        )
+
+    async def _async_credentials_form(
+        self,
+        step_id: str,
+        user_input: dict[str, Any] | None,
+        entry: ConfigEntry | None = None,
+    ) -> ConfigFlowResult:
+        """Validate OAuth credentials and discard the client secret."""
+        errors = {}
         if user_input is not None:
             client_id = user_input[CONF_CLIENT_ID].strip()
             client_secret = user_input[CONF_CLIENT_SECRET].strip()
-            try:
-                # Validate OAuth credentials
-                auth = VKCloudAuth(
-                    self.hass,
-                    client_id=client_id,
-                    client_secret=client_secret,
-                )
-                await auth.get_access_token()
-                refresh_token = auth.get_refresh_token()
-                if not refresh_token:
-                    raise Exception("No refresh token received from OAuth server")
-                return self.async_create_entry(
-                    title="VK Cloud Vision",
-                    data={
-                        CONF_CLIENT_ID: client_id,
-                        CONF_REFRESH_TOKEN: refresh_token,
-                    },
-                )
-            except Exception as e:  # noqa: BLE001
+            if not client_id or not client_secret:
                 errors["base"] = "invalid_auth"
-                LOGGER.exception("Authentication error", exc_info=e)
+            else:
+                auth = VKCloudAuth(self.hass, client_id=client_id, client_secret=client_secret)
+                try:
+                    await auth.get_access_token()
+                except VKCloudVisionAuthError:
+                    errors["base"] = "invalid_auth"
+                except VKCloudVisionAPIError:
+                    errors["base"] = "cannot_connect"
+                else:
+                    if refresh_token := auth.get_refresh_token():
+                        data = {CONF_CLIENT_ID: client_id, CONF_REFRESH_TOKEN: refresh_token}
+                        if entry is None:
+                            return self.async_create_entry(title="VK Cloud Vision", data=data)
+                        return self.async_update_reload_and_abort(entry, data=data)
+                    errors["base"] = "invalid_auth"
 
+        schema = vol.Schema({
+            vol.Required(CONF_CLIENT_ID): str,
+            vol.Required(CONF_CLIENT_SECRET): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
+        })
+        if entry is not None and CONF_CLIENT_ID in entry.data:
+            schema = self.add_suggested_values_to_schema(schema, {CONF_CLIENT_ID: entry.data[CONF_CLIENT_ID]})
         return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema({
-                vol.Required(CONF_CLIENT_ID): str,
-                vol.Required(CONF_CLIENT_SECRET): str,
-            }),
+            step_id=step_id,
+            data_schema=schema,
             errors=errors,
             description_placeholders={
                 "obtain_token_url": "https://msk.cloud.vk.com/app/services/machinelearning/vision/access/"
-            }
+            },
         )
-
-    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle reconfiguration (force OAuth credentials)."""
-        entry: ConfigEntry = self.hass.config_entries.async_get_entry(
-            self.context["entry_id"]  # type: ignore[index]
-        )
-
-        errors: dict[str, str] = {}
-        current_client_id = entry.data.get(CONF_CLIENT_ID, "")
-
-        if user_input is not None:
-            client_id = user_input.get(CONF_CLIENT_ID, current_client_id).strip()
-            client_secret = user_input[CONF_CLIENT_SECRET].strip()
-            try:
-                auth = VKCloudAuth(
-                    self.hass,
-                    client_id=client_id,
-                    client_secret=client_secret,
-                )
-                await auth.get_access_token()
-                refresh_token = auth.get_refresh_token()
-                if not refresh_token:
-                    raise Exception("No refresh token received from OAuth server")
-                # Update to OAuth format (removes any existing static token)
-                self.hass.config_entries.async_update_entry(
-                    entry,
-                    data={
-                        CONF_CLIENT_ID: client_id,
-                        CONF_REFRESH_TOKEN: refresh_token,
-                    },
-                    version=self.VERSION,
-                )
-                self.hass.config_entries.async_schedule_reload(entry.entry_id)
-                return self.async_abort(reason="reconfigure_successful")
-            except Exception as e:  # noqa: BLE001
-                errors["base"] = "invalid_auth"
-                LOGGER.exception("Reconfiguration error", exc_info=e)
-
-        return self.async_show_form(
-            step_id="reconfigure",
-            data_schema=vol.Schema({
-                vol.Required(CONF_CLIENT_ID, default=current_client_id): str,
-                vol.Required(CONF_CLIENT_SECRET): str,
-            }),
-            errors=errors,
-            description_placeholders={
-                "obtain_token_url": "https://msk.cloud.vk.com/app/services/machinelearning/vision/access/"
-            }
-        )
-
-    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
-        """Perform reauth upon ConfigEntryAuthFailed."""
-        return await self.async_step_reauth_confirm()
-
-    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Dialog that informs the user that re-authentication is required."""
-        # After user confirms → show the exact same API key form as reconfigure
-        # (context["entry_id"] is already set by HA for reauth flows)
-        return await self.async_step_reconfigure()
 
     @staticmethod
     def async_get_options_flow(_entry: ConfigEntry) -> OptionsFlow:
@@ -226,6 +223,7 @@ class VKCloudVisionOptionsFlow(OptionsFlow):
                     errors["base"] = "truncate_failed"
                     LOGGER.error("Truncate space %s failed: %s", space, err)
                 else:
+                    self._remove_aliases(space)
                     return self.async_abort(reason="truncate_success")
 
         space_default = user_input.get(CONF_TRUNCATE_SPACE, DEFAULT_SPACE) if user_input else DEFAULT_SPACE
@@ -261,9 +259,11 @@ class VKCloudVisionOptionsFlow(OptionsFlow):
                 person_ids = []
                 if person_ids_str:
                     try:
-                        person_ids = [int(id.strip()) for id in person_ids_str.split(",") if id.strip()]
+                        person_ids = [int(value.strip()) for value in person_ids_str.split(",") if value.strip()]
                     except ValueError:
                         errors["base"] = "invalid_person_ids"
+                if not person_ids or any(person_id < 1 for person_id in person_ids):
+                    errors["base"] = "invalid_person_ids"
                 if not errors:
                     client: VKCloudVision = self.config_entry.runtime_data
                     try:
@@ -272,6 +272,7 @@ class VKCloudVisionOptionsFlow(OptionsFlow):
                         errors["base"] = "delete_failed"
                         LOGGER.error("Delete persons from space %s failed: %s", space, err)
                     else:
+                        self._remove_aliases(space, set(person_ids))
                         return self.async_abort(reason="delete_success")
 
         space_default = user_input.get(CONF_DELETE_PERSON_SPACE, DEFAULT_SPACE) if user_input else DEFAULT_SPACE
@@ -293,6 +294,21 @@ class VKCloudVisionOptionsFlow(OptionsFlow):
             data_schema=data_schema,
             errors=errors,
         )
+
+    def _remove_aliases(self, space: int, person_ids: set[int] | None = None) -> None:
+        options = dict(self.config_entry.options)
+        aliases = options.get(CONF_PERSON_ALIASES, [])
+        remaining = [
+            alias
+            for alias in aliases
+            if alias["space"] != space
+            or (person_ids is not None and alias["person_id"] not in person_ids)
+        ]
+        if len(remaining) != len(aliases):
+            options[CONF_PERSON_ALIASES] = remaining
+            self.hass.config_entries.async_update_entry(
+                self.config_entry, options=options
+            )
 
     async def async_step_manual_training(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle manual training with photo upload."""
@@ -376,7 +392,7 @@ class VKCloudVisionOptionsFlow(OptionsFlow):
             )
 
     def _update_aliases(self, person_ids: list[int], space: int, alias: str) -> list[dict[str, Any]]:
-        aliases: list[dict[str, Any]] = list(self.config_entry.options.get(CONF_PERSON_ALIASES, []))
+        aliases = [dict(item) for item in self.config_entry.options.get(CONF_PERSON_ALIASES, [])]
         first_pid = person_ids[0]
 
         if alias:

@@ -7,11 +7,13 @@
 <div align="center">
   <h1>VK Cloud Vision для Home Assistant</h1>
 
-  [![Добавить репозиторий в HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=black-roland&repository=homeassistant-vkcloud-vision&category=integration)
+  [![Добавить репозиторий в HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ruslan200065&repository=homeassistant-vkcloud-vision&category=integration)
   [![Настроить интеграцию](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=vkcloud_vision)
 
   <p>Интеграция добавляет поддержку облачного распознавания объектов и текста через VK Cloud Vision.<br>Используйте возможности компьютерного зрения для создания автоматизаций на основе анализа изображений с камер видеонаблюдения.</p>
 </div>
+
+Это форк [исходной интеграции](https://github.com/black-roland/homeassistant-vkcloud-vision). [Аудит и план развития](ROADMAP.md).
 
 ## Возможности
 
@@ -41,7 +43,7 @@ VK Cloud Vision — это облачный сервис, плата за кот
 
 ### Установка
 
-1. [Скачайте интеграцию](https://my.home-assistant.io/redirect/hacs_repository/?owner=black-roland&repository=homeassistant-vkcloud-vision&category=integration) через HACS.
+1. [Скачайте интеграцию](https://my.home-assistant.io/redirect/hacs_repository/?owner=ruslan200065&repository=homeassistant-vkcloud-vision&category=integration) через HACS.
 2. Перезапустите Home Assistant.
 3. Перейдите в **Настройки → Устройства и службы → Добавить интеграцию** или используйте [кнопку настройки](https://my.home-assistant.io/redirect/config_flow_start/?domain=vkcloud_vision).
 4. Введите **Идентификатор клиента** и **Секретный ключ**, полученные в личном кабинете VK Cloud.
@@ -149,6 +151,7 @@ VK Cloud Vision — это облачный сервис, плата за кот
   - `rus`: Подписи на русском языке;
   - `eng`: Подписи на английском языке.
 - **num_snapshots** (необязательное, по умолчанию `1`): Количество последовательных стоп-кадров, снимаемых с камеры заданным интервалом. Повышает точность распознавания, особенно для движущихся объектов.
+- **snapshot_index** (необязательное, по умолчанию `1`): Номер сохраняемого кадра, от `1` до `num_snapshots`. Разметка берётся из результатов именно этого кадра.
 - **snapshot_interval_sec** (необязательное, по умолчанию `0.5`): Интервал в секундах между стоп-кадрами.
 - **max_retries** (необязательное, по умолчанию `3`): Количество попыток повторного выполнения запросов к API в случае таймаутов или временных ошибок.
 
@@ -165,6 +168,10 @@ data:
   file_out: /config/www/vkcloud_vision_snapshot.jpg
   bounding_boxes: rus
 ```
+
+При сохранении снимков с нескольких камер используйте `{camera}` в пути, например `/config/www/vision_{camera}.jpg`. Вместо него подставляется идентификатор камеры без префикса `camera.`. `file_out` принимает абсолютный путь к JPEG, PNG, WebP или TIFF в разрешённом каталоге Home Assistant (`www`, медиа или каталог из `allowlist_external_dirs`). Файлы в `www` доступны через `/local`.
+
+`max_retries` задаёт общее число попыток, включая первую. Для распознавания лиц с добавлением людей или обновлением эмбеддингов выполняется одна попытка. При частичном успехе API возвращаются результаты успешных режимов и сведения об ошибках. При полном сбое детекции объектов или лиц действие возвращает `response_type: error`. Если задан `file_out` и снимок удалось сохранить, в ответе будет путь к неразмеченному кадру.
 
 ### `vkcloud_vision.recognize_faces`
 
@@ -243,7 +250,7 @@ data:
 
 # VK Cloud Vision for Home Assistant
 
-[![Add repository to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=black-roland&repository=homeassistant-vkcloud-vision&category=integration)
+[![Add repository to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ruslan200065&repository=homeassistant-vkcloud-vision&category=integration)
 [![Configure Integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=vkcloud_vision)
 
 This integration brings cloud-based object and text recognition to Home Assistant using the [VK Cloud Vision](https://cloud.vk.com/vision/) service. Leverage computer vision to create automations based on image analysis from surveillance cameras.
@@ -271,7 +278,7 @@ This integration brings cloud-based object and text recognition to Home Assistan
 
 1. Open **HACS → Integrations**.
 2. Click the three-dot menu in the top right and select **Custom repositories**.
-3. Add the repository: `https://github.com/black-roland/homeassistant-vkcloud-vision`, select **Integration** as the category.
+3. Add the repository: `https://github.com/ruslan200065/homeassistant-vkcloud-vision`, select **Integration** as the category.
 4. Find and install the **VK Cloud Vision** integration.
 5. Restart Home Assistant.
 
@@ -280,6 +287,12 @@ This integration brings cloud-based object and text recognition to Home Assistan
 1. Go to **Settings → Devices & Services → Add Integration** or use the [configuration button](https://my.home-assistant.io/redirect/config_flow_start/?domain=vkcloud_vision).
 2. Enter the **Client ID** and **Client Secret** obtained from VK Cloud.
 3. Save the configuration and restart Home Assistant if prompted.
+
+## Snapshot output
+
+Set `snapshot_index` in `vkcloud_vision.detect_objects` to save and annotate a specific frame from the burst. It defaults to 1. For multiple cameras, use `{camera}` in `file_out`, for example `/config/www/vision_{camera}.jpg`. Use an absolute JPEG, PNG, WebP or TIFF path in a directory allowed by Home Assistant. Files under `www` are available through `/local`.
+
+`max_retries` is the total number of attempts. Face recognition with database updates enabled makes one attempt. An action can return successful results and errors together when only some images or modes fail.
 
 ## Face Recognition
 

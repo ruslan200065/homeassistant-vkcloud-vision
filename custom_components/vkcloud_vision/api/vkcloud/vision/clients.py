@@ -2,12 +2,14 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .base_client import VKCloudVisionBaseClient
-from .response import (VKCloudVisionFaceRecognitionResponse,
-                       VKCloudVisionObjectDetectionResponse,
-                       VKCloudVisionTextRecognitionResponse)
+from .response import (
+    VKCloudVisionFaceRecognitionResponse,
+    VKCloudVisionObjectDetectionResponse,
+    VKCloudVisionTextRecognitionResponse,
+)
 
 
 class VKCloudVisionObjectsClient(VKCloudVisionBaseClient):
@@ -15,9 +17,9 @@ class VKCloudVisionObjectsClient(VKCloudVisionBaseClient):
 
     async def detect(
         self,
-        files: List[bytes],
-        modes: List[str],
-        images: List[Dict[str, str]],
+        files: list[bytes],
+        modes: list[str],
+        images: list[dict[str, str]],
         prob_threshold: float,
         max_retries: int = 3,
     ) -> VKCloudVisionObjectDetectionResponse:
@@ -26,8 +28,12 @@ class VKCloudVisionObjectsClient(VKCloudVisionBaseClient):
             "mode": modes,  # e.g., ["object", "object2", "scene"]
             "images": images,  # Expected format: [{"name": str}]
         }
-        raw_response = await self._make_request("/v1/objects/detect", meta, files, max_retries=max_retries)
-        return VKCloudVisionObjectDetectionResponse(raw_response=raw_response, prob_threshold=prob_threshold)
+        raw_response = await self._make_request(
+            "/v1/objects/detect", meta, files, max_retries=max_retries
+        )
+        return VKCloudVisionObjectDetectionResponse(
+            raw_response=raw_response, prob_threshold=prob_threshold
+        )
 
 
 class VKCloudVisionTextClient(VKCloudVisionBaseClient):
@@ -35,18 +41,19 @@ class VKCloudVisionTextClient(VKCloudVisionBaseClient):
 
     async def scene_text_recognize(
         self,
-        files: List[bytes],
-        images: List[Dict[str, str]],
-        lang: Optional[str] = None,
+        files: list[bytes],
+        images: list[dict[str, str]],
+        lang: str | None = None,
         max_retries: int = 3,
     ) -> VKCloudVisionTextRecognitionResponse:
         """Recognize text in scene photos."""
         images_meta = [
-            {"name": img["name"], **({"lang": lang} if lang else {})}
-            for img in images
+            {"name": img["name"], **({"lang": lang} if lang else {})} for img in images
         ]
-        meta: Dict[str, Any] = {"images": images_meta}
-        raw_response = await self._make_request("/v1/scene_text/recognize", meta, files, max_retries=max_retries)
+        meta: dict[str, Any] = {"images": images_meta}
+        raw_response = await self._make_request(
+            "/v1/scene_text/recognize", meta, files, max_retries=max_retries
+        )
         return VKCloudVisionTextRecognitionResponse(raw_response)
 
 
@@ -55,40 +62,46 @@ class VKCloudVisionPersonsClient(VKCloudVisionBaseClient):
 
     async def set(
         self,
-        files: List[bytes],
+        files: list[bytes],
         space: int,
-        images: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        images: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         """Set a relationship between a photo and person_id."""
         meta = {
             "space": str(space),
             "images": images,  # Expected format: [{"name": str, "person_id": int}]
         }
-        return await self._make_request("/v1/persons/set", meta, files, max_retries=1)
+        return await self._make_request(
+            "/v1/persons/set", meta, files, max_retries=1, allow_partial=False
+        )
 
     async def delete(
         self,
         space: int,
         person_id: int | list[int],
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Delete a relationship between a photo and person_id."""
         person_ids = [person_id] if isinstance(person_id, int) else person_id
         meta = {
             "space": str(space),
             "images": [{"name": str(pid), "person_id": pid} for pid in person_ids],
         }
-        return await self._make_request("/v1/persons/delete", meta, max_retries=1)
+        return await self._make_request(
+            "/v1/persons/delete", meta, max_retries=1, allow_partial=False
+        )
 
-    async def truncate(self, space: int) -> Dict[str, Any]:
+    async def truncate(self, space: int) -> dict[str, Any]:
         """Clear the entire space."""
         meta = {"space": str(space)}
-        return await self._make_request("/v1/persons/truncate", meta, max_retries=1)
+        return await self._make_request(
+            "/v1/persons/truncate", meta, max_retries=1, allow_partial=False
+        )
 
     async def recognize(
         self,
-        files: List[bytes],
+        files: list[bytes],
         space: int,
-        images: List[Dict[str, str]],
+        images: list[dict[str, str]],
         create_new: bool = False,
         update_embedding: bool = True,
         confidence_threshold: float = 0.1,
@@ -102,9 +115,14 @@ class VKCloudVisionPersonsClient(VKCloudVisionBaseClient):
             "update_embedding": update_embedding,
             "images": images,  # Expected format: [{"name": str}]
         }
-        raw_response = await self._make_request("/v1/persons/recognize", meta, files, max_retries=max_retries)
+        raw_response = await self._make_request(
+            "/v1/persons/recognize",
+            meta,
+            files,
+            max_retries=1 if create_new or update_embedding else max_retries,
+        )
         return VKCloudVisionFaceRecognitionResponse(
             raw_response,
             confidence_threshold=confidence_threshold,
-            tag_to_alias_map=tag_to_alias_map
+            tag_to_alias_map=tag_to_alias_map,
         )
