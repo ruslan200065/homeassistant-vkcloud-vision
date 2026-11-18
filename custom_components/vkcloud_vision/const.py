@@ -19,6 +19,7 @@ CONF_CLIENT_SECRET = "client_secret"
 CONF_REFRESH_TOKEN = "refresh_token"
 
 ATTR_MODES = "modes"
+ATTR_OBJECT_CLASSES = "object_classes"
 ATTR_PROB_THRESHOLD = "prob_threshold"
 ATTR_LANG = "lang"
 ATTR_FILE_OUT = "file_out"

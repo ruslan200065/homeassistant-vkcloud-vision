@@ -25,10 +25,18 @@ def _passes_threshold(value: JsonValueType, threshold: float) -> bool:
 class VKCloudVisionObjectDetectionResponse:
     """Class to handle and parse VK Cloud Vision object detection API responses."""
 
-    def __init__(self, raw_response: JsonObjectType, prob_threshold: float = 0.1):
+    def __init__(
+        self,
+        raw_response: JsonObjectType,
+        prob_threshold: float = 0.1,
+        object_classes: list[str] | None = None,
+    ):
         """Initialize with API response."""
         self._errors: list[str] = []
         self._prob_threshold = prob_threshold
+        self._object_classes = {
+            name.strip().casefold() for name in object_classes or []
+        }
         self._data = self._process_response(raw_response)
 
     @property
@@ -56,6 +64,15 @@ class VKCloudVisionObjectDetectionResponse:
             for label in cast(list[JsonObjectType], image.get("labels", []))
         ]
 
+    def _matches_class(self, label: JsonObjectType) -> bool:
+        if not self._object_classes:
+            return True
+        return any(
+            isinstance(value := label.get(key), str)
+            and value.strip().casefold() in self._object_classes
+            for key in ("eng", "rus")
+        )
+
     def _process_response(
         self, response: JsonObjectType
     ) -> dict[str, list[JsonObjectType]]:
@@ -77,6 +94,7 @@ class VKCloudVisionObjectDetectionResponse:
                         label
                         for label in _result_items(image["labels"], "labels")
                         if _passes_threshold(label.get("prob", 0), self._prob_threshold)
+                        and self._matches_class(label)
                     ]
 
                 processed[mode].append(processed_image)

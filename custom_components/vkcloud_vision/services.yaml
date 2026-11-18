@@ -18,6 +18,11 @@ detect_objects:
             - pedestrian
             - selfie
           translation_key: modes
+    object_classes:
+      example: ["person", "cat"]
+      selector:
+        text:
+          multiple: true
     prob_threshold:
       default: 0.1
       required: false

@@ -152,6 +152,7 @@ VK Cloud Vision — это облачный сервис, плата за кот
   - `eng`: Подписи на английском языке.
 - **num_snapshots** (необязательное, по умолчанию `1`): Количество последовательных стоп-кадров, снимаемых с камеры заданным интервалом. Повышает точность распознавания, особенно для движущихся объектов.
 - **snapshot_index** (необязательное, по умолчанию `1`): Номер сохраняемого кадра, от `1` до `num_snapshots`. Разметка берётся из результатов именно этого кадра.
+- **object_classes** (необязательное): Список классов, например `["person", "кошка"]`. Метки сравниваются с полями `eng` и `rus` целиком без учёта регистра. Фильтр применяется к результату и разметке. Пустой список оставляет все классы. Кадры отправляются в VK Cloud как обычно, поэтому фильтр не уменьшает число облачных запросов.
 - **snapshot_interval_sec** (необязательное, по умолчанию `0.5`): Интервал в секундах между стоп-кадрами.
 - **max_retries** (необязательное, по умолчанию `3`): Количество попыток повторного выполнения запросов к API в случае таймаутов или временных ошибок.
 
@@ -219,6 +220,10 @@ target:
 data:
   lang: rus
 ```
+
+## Диагностика
+
+В Home Assistant откройте **Настройки → Устройства и службы → VK Cloud Vision → ⋮ → Скачать диагностику**. В отчёте видны тип авторизации, число успешных, частичных и ошибочных вызовов и время последнего результата по камере и действию. Учитываются до 100 последних сочетаний камеры и действия с момента загрузки интеграции. Перед публикацией отчёта проверьте имена камер. Кадры, данные распознавания и учётные данные в отчёт не включаются.
 
 ## Поддержка автора
 
@@ -293,6 +298,8 @@ This integration brings cloud-based object and text recognition to Home Assistan
 Set `snapshot_index` in `vkcloud_vision.detect_objects` to save and annotate a specific frame from the burst. It defaults to 1. For multiple cameras, use `{camera}` in `file_out`, for example `/config/www/vision_{camera}.jpg`. Use an absolute JPEG, PNG, WebP or TIFF path in a directory allowed by Home Assistant. Files under `www` are available through `/local`.
 
 `max_retries` is the total number of attempts. Face recognition with database updates enabled makes one attempt. An action can return successful results and errors together when only some images or modes fail.
+
+Pass `object_classes: ["person", "cat"]` to filter returned labels and annotations. The filter matches exact English or Russian class names case-insensitively and runs locally after detection. Use **Download diagnostics** on the integration page in Home Assistant for per-camera action counts and timestamps since the last load.
 
 ## Face Recognition
 

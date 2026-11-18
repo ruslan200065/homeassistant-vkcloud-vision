@@ -59,11 +59,35 @@ class VKCloudVisionEntity(ImageProcessingEntity):
             entry_type=dr.DeviceEntryType.SERVICE,
         )
         self._last_detection = None
+        self._action_stats: dict[tuple[str, str], dict] = {}
 
     @property
     def state(self) -> str | None:
         """Return the state of the entity."""
         return self._last_detection
+
+    def record_action(self, camera: str, action: str, status: ResponseType) -> None:
+        """Record action outcomes without storing recognition data."""
+        key = (camera, action)
+        stats = self._action_stats.pop(
+            key, {"camera": camera, "action": action, "counts": {}}
+        )
+        counts = stats["counts"]
+        counts[status] = counts.get(status, 0) + 1
+        stats["last_status"] = status
+        stats["last_completed_at"] = dt_util.utcnow().isoformat()
+        if status == ResponseType.ACTION_DONE:
+            stats["last_success_at"] = stats["last_completed_at"]
+        self._action_stats[key] = stats
+        if len(self._action_stats) > 100:
+            del self._action_stats[next(iter(self._action_stats))]
+
+    def action_diagnostics(self) -> list[dict]:
+        """Return an independent snapshot of current action statistics."""
+        return [
+            {**stats, "counts": dict(stats["counts"])}
+            for stats in self._action_stats.values()
+        ]
 
     def process_image(self, _image: bytes) -> None:
         raise HomeAssistantError("Use `vkcloud_vision.detect_objects` instead")
@@ -82,6 +106,7 @@ class VKCloudVisionEntity(ImageProcessingEntity):
         snapshot_interval_sec: float,
         max_retries: int,
         snapshot_index: int = 1,
+        object_classes: list[str] | None = None,
     ) -> JsonObjectType:
         """Detect objects with optional bounding box drawing."""
         images_data = await self._async_get_images(
@@ -101,6 +126,7 @@ class VKCloudVisionEntity(ImageProcessingEntity):
                 modes=modes,
                 images=images_meta,
                 prob_threshold=prob_threshold,
+                object_classes=object_classes,
                 max_retries=max_retries,
             )
         except VKCloudVisionAPIError as err:

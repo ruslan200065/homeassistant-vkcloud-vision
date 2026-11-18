@@ -32,6 +32,7 @@ from .const import (
     ATTR_MAX_RETRIES,
     ATTR_MODES,
     ATTR_NUM_SNAPSHOTS,
+    ATTR_OBJECT_CLASSES,
     ATTR_PROB_THRESHOLD,
     ATTR_SNAPSHOT_INDEX,
     ATTR_SNAPSHOT_INTERVAL_SEC,
@@ -110,6 +111,7 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
             method = entity.async_detect_objects
             kwargs.update(
                 modes=data[ATTR_MODES],
+                object_classes=data.get(ATTR_OBJECT_CLASSES),
                 prob_threshold=data[ATTR_PROB_THRESHOLD],
                 bounding_boxes=data[ATTR_BOUNDING_BOXES],
                 num_snapshots=data[ATTR_NUM_SNAPSHOTS],
@@ -165,6 +167,7 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
                     "response_type": ResponseType.ERROR,
                     "error": str(err),
                 }
+            entity.record_action(camera, call.service, result[camera]["response_type"])
         return result
 
     hass.services.async_register(
@@ -173,6 +176,11 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
         handle_action,
         schema=cv.make_entity_service_schema(
             {
+                vol.Optional(ATTR_OBJECT_CLASSES): vol.All(
+                    cv.ensure_list,
+                    [vol.All(str, str.strip, vol.Length(min=1, max=100))],
+                    vol.Length(max=100),
+                ),
                 vol.Optional(ATTR_MODES, default=DEFAULT_MODES): vol.All(
                     cv.ensure_list, [vol.In(VALID_MODES)], vol.Length(min=1)
                 ),

@@ -22,6 +22,7 @@ class VKCloudVisionObjectsClient(VKCloudVisionBaseClient):
         images: list[dict[str, str]],
         prob_threshold: float,
         max_retries: int = 3,
+        object_classes: list[str] | None = None,
     ) -> VKCloudVisionObjectDetectionResponse:
         """Detect objects in a photo."""
         meta = {
@@ -32,7 +33,9 @@ class VKCloudVisionObjectsClient(VKCloudVisionBaseClient):
             "/v1/objects/detect", meta, files, max_retries=max_retries
         )
         return VKCloudVisionObjectDetectionResponse(
-            raw_response=raw_response, prob_threshold=prob_threshold
+            raw_response=raw_response,
+            prob_threshold=prob_threshold,
+            object_classes=object_classes,
         )
 
 

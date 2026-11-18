@@ -147,6 +147,10 @@
         "snapshot_index": {
           "name": "Snapshot to save",
           "description": "One-based frame number in the burst. Used for the saved image and its annotations."
+        },
+        "object_classes": {
+          "name": "Object classes",
+          "description": "Exact English or Russian class names, matched case-insensitively. Leave empty to include all classes."
         }
       }
     },
