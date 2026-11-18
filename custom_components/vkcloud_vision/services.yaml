@@ -18,6 +18,18 @@ detect_objects:
             - pedestrian
             - selfie
           translation_key: modes
+    region:
+      example: "{left: 100, top: 50, right: 800, bottom: 600}"
+      selector:
+        object:
+    cooldown_sec:
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 3600
+          unit_of_measurement: s
+          mode: box
     object_classes:
       example: ["person", "cat"]
       selector:

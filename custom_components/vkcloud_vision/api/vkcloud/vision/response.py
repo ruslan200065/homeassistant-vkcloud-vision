@@ -30,6 +30,7 @@ class VKCloudVisionObjectDetectionResponse:
         raw_response: JsonObjectType,
         prob_threshold: float = 0.1,
         object_classes: list[str] | None = None,
+        region: tuple[int, int, int, int] | None = None,
     ):
         """Initialize with API response."""
         self._errors: list[str] = []
@@ -37,6 +38,7 @@ class VKCloudVisionObjectDetectionResponse:
         self._object_classes = {
             name.strip().casefold() for name in object_classes or []
         }
+        self._region = region
         self._data = self._process_response(raw_response)
 
     @property
@@ -73,6 +75,25 @@ class VKCloudVisionObjectDetectionResponse:
             for key in ("eng", "rus")
         )
 
+    def _matches_region(self, label: JsonObjectType) -> bool:
+        if self._region is None:
+            return True
+        coords = label.get("coord")
+        if (
+            not isinstance(coords, list)
+            or len(coords) != 4
+            or not all(isinstance(point, (int, float)) for point in coords)
+        ):
+            return False
+        x1, y1, x2, y2 = coords
+        left, top, right, bottom = self._region
+        return (
+            x1 <= x2
+            and y1 <= y2
+            and left <= (x1 + x2) / 2 <= right
+            and top <= (y1 + y2) / 2 <= bottom
+        )
+
     def _process_response(
         self, response: JsonObjectType
     ) -> dict[str, list[JsonObjectType]]:
@@ -95,6 +116,7 @@ class VKCloudVisionObjectDetectionResponse:
                         for label in _result_items(image["labels"], "labels")
                         if _passes_threshold(label.get("prob", 0), self._prob_threshold)
                         and self._matches_class(label)
+                        and self._matches_region(label)
                     ]
 
                 processed[mode].append(processed_image)

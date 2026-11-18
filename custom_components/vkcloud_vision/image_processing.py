@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+from time import monotonic
 
 from homeassistant.components.camera import async_get_image
 from homeassistant.components.image_processing import DOMAIN as IMAGE_PROCESSING_DOMAIN
@@ -59,12 +60,26 @@ class VKCloudVisionEntity(ImageProcessingEntity):
             entry_type=dr.DeviceEntryType.SERVICE,
         )
         self._last_detection = None
+        self._next_detection: dict[str, float] = {}
         self._action_stats: dict[tuple[str, str], dict] = {}
 
     @property
     def state(self) -> str | None:
         """Return the state of the entity."""
         return self._last_detection
+
+    def reserve_detection(self, camera: str, cooldown: int) -> bool:
+        """Reserve a detection start before awaiting any I/O."""
+        now = monotonic()
+        self._next_detection = {
+            key: deadline
+            for key, deadline in self._next_detection.items()
+            if deadline > now
+        }
+        if camera in self._next_detection:
+            return False
+        self._next_detection[camera] = now + cooldown
+        return True
 
     def record_action(self, camera: str, action: str, status: ResponseType) -> None:
         """Record action outcomes without storing recognition data."""
@@ -107,6 +122,7 @@ class VKCloudVisionEntity(ImageProcessingEntity):
         max_retries: int,
         snapshot_index: int = 1,
         object_classes: list[str] | None = None,
+        region: tuple[int, int, int, int] | None = None,
     ) -> JsonObjectType:
         """Detect objects with optional bounding box drawing."""
         images_data = await self._async_get_images(
@@ -127,6 +143,7 @@ class VKCloudVisionEntity(ImageProcessingEntity):
                 images=images_meta,
                 prob_threshold=prob_threshold,
                 object_classes=object_classes,
+                region=region,
                 max_retries=max_retries,
             )
         except VKCloudVisionAPIError as err:

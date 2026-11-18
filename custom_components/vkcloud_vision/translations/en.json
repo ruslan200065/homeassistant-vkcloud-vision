@@ -151,6 +151,14 @@
         "object_classes": {
           "name": "Object classes",
           "description": "Exact English or Russian class names, matched case-insensitively. Leave empty to include all classes."
+        },
+        "cooldown_sec": {
+          "name": "Minimum interval",
+          "description": "Time between detection starts on the same camera. Set to 0 to disable."
+        },
+        "region": {
+          "name": "Image region",
+          "description": "Keep objects whose bounding-box centers fall inside the region. Specify left, top, right, and bottom in pixels."
         }
       }
     },

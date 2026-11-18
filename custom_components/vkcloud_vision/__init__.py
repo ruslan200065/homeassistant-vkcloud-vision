@@ -26,6 +26,7 @@ from .api.vkcloud.vision import VKCloudVision
 from .const import (
     ATTR_BOUNDING_BOXES,
     ATTR_CONFIDENCE_THRESHOLD,
+    ATTR_COOLDOWN_SEC,
     ATTR_CREATE_NEW,
     ATTR_FILE_OUT,
     ATTR_LANG,
@@ -34,6 +35,7 @@ from .const import (
     ATTR_NUM_SNAPSHOTS,
     ATTR_OBJECT_CLASSES,
     ATTR_PROB_THRESHOLD,
+    ATTR_REGION,
     ATTR_SNAPSHOT_INDEX,
     ATTR_SNAPSHOT_INTERVAL_SEC,
     ATTR_SPACE,
@@ -109,6 +111,20 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
         file_out = data.get(ATTR_FILE_OUT)
         if call.service == SERVICE_DETECT_OBJECTS:
             method = entity.async_detect_objects
+            if region := data.get(ATTR_REGION):
+                if (
+                    region["left"] >= region["right"]
+                    or region["top"] >= region["bottom"]
+                ):
+                    raise HomeAssistantError(
+                        "region requires left < right and top < bottom"
+                    )
+                kwargs[ATTR_REGION] = (
+                    region["left"],
+                    region["top"],
+                    region["right"],
+                    region["bottom"],
+                )
             kwargs.update(
                 modes=data[ATTR_MODES],
                 object_classes=data.get(ATTR_OBJECT_CLASSES),
@@ -151,7 +167,17 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
             )
 
         result = {}
+        cooldown = data.get(ATTR_COOLDOWN_SEC, 0)
         for camera in cameras:
+            if cooldown and not entity.reserve_detection(camera, cooldown):
+                result[camera] = {
+                    "response": None,
+                    "file_out": None,
+                    "response_type": ResponseType.SKIPPED,
+                    "error": None,
+                }
+                entity.record_action(camera, call.service, ResponseType.SKIPPED)
+                continue
             if call.service != SERVICE_RECOGNIZE_TEXT:
                 kwargs[ATTR_FILE_OUT] = (
                     file_out.replace("{camera}", camera.split(".", 1)[1])
@@ -176,6 +202,15 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
         handle_action,
         schema=cv.make_entity_service_schema(
             {
+                vol.Optional(ATTR_REGION): vol.Schema(
+                    {
+                        vol.Required(edge): vol.All(vol.Coerce(int), vol.Range(min=0))
+                        for edge in ("left", "top", "right", "bottom")
+                    }
+                ),
+                vol.Optional(ATTR_COOLDOWN_SEC, default=0): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=3600)
+                ),
                 vol.Optional(ATTR_OBJECT_CLASSES): vol.All(
                     cv.ensure_list,
                     [vol.All(str, str.strip, vol.Length(min=1, max=100))],

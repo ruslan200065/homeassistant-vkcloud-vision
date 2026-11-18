@@ -153,6 +153,8 @@ VK Cloud Vision — это облачный сервис, плата за кот
 - **num_snapshots** (необязательное, по умолчанию `1`): Количество последовательных стоп-кадров, снимаемых с камеры заданным интервалом. Повышает точность распознавания, особенно для движущихся объектов.
 - **snapshot_index** (необязательное, по умолчанию `1`): Номер сохраняемого кадра, от `1` до `num_snapshots`. Разметка берётся из результатов именно этого кадра.
 - **object_classes** (необязательное): Список классов, например `["person", "кошка"]`. Метки сравниваются с полями `eng` и `rus` целиком без учёта регистра. Фильтр применяется к результату и разметке. Пустой список оставляет все классы. Кадры отправляются в VK Cloud как обычно, поэтому фильтр не уменьшает число облачных запросов.
+- **cooldown_sec** (необязательное, по умолчанию `0`): Минимальный интервал в секундах между запусками детекции по одной камере. Например, `30` пропускает повторный вызов в течение 30 секунд со старта предыдущего. Для пропуска возвращается `response_type: skipped`, кадр не запрашивается. Укажите параметр во всех автоматизациях, которые должны соблюдать паузу. Вызов с `0` выполняется независимо от неё.
+- **region** (необязательное): Прямоугольник в пикселях исходного кадра, например `{left: 100, top: 50, right: 800, bottom: 600}`. В ответ и разметку попадают объекты, центр рамки которых находится внутри зоны или на её границе. При разном разрешении камер задавайте зону отдельным вызовом для каждой камеры.
 - **snapshot_interval_sec** (необязательное, по умолчанию `0.5`): Интервал в секундах между стоп-кадрами.
 - **max_retries** (необязательное, по умолчанию `3`): Количество попыток повторного выполнения запросов к API в случае таймаутов или временных ошибок.
 
@@ -168,6 +170,23 @@ data:
     - car_number
   file_out: /config/www/vkcloud_vision_snapshot.jpg
   bounding_boxes: rus
+```
+
+Пример для автоматизации, которая проверяет наличие человека в зоне у двери с интервалом в 30 секунд.
+
+```yaml
+action: vkcloud_vision.detect_objects
+target:
+  entity_id: camera.front_door
+data:
+  object_classes: ["person"]
+  region:
+    left: 100
+    top: 50
+    right: 800
+    bottom: 600
+  cooldown_sec: 30
+response_variable: door_detection
 ```
 
 При сохранении снимков с нескольких камер используйте `{camera}` в пути, например `/config/www/vision_{camera}.jpg`. Вместо него подставляется идентификатор камеры без префикса `camera.`. `file_out` принимает абсолютный путь к JPEG, PNG, WebP или TIFF в разрешённом каталоге Home Assistant (`www`, медиа или каталог из `allowlist_external_dirs`). Файлы в `www` доступны через `/local`.
@@ -223,7 +242,7 @@ data:
 
 ## Диагностика
 
-В Home Assistant откройте **Настройки → Устройства и службы → VK Cloud Vision → ⋮ → Скачать диагностику**. В отчёте видны тип авторизации, число успешных, частичных и ошибочных вызовов и время последнего результата по камере и действию. Учитываются до 100 последних сочетаний камеры и действия с момента загрузки интеграции. Перед публикацией отчёта проверьте имена камер. Кадры, данные распознавания и учётные данные в отчёт не включаются.
+В Home Assistant откройте **Настройки → Устройства и службы → VK Cloud Vision → ⋮ → Скачать диагностику**. В отчёте видны тип авторизации, число успешных, частичных, ошибочных и пропущенных вызовов и время последнего результата по камере и действию. Учитываются до 100 последних сочетаний камеры и действия с момента загрузки интеграции. Перед публикацией отчёта проверьте имена камер. Кадры, данные распознавания и учётные данные в отчёт не включаются.
 
 ## Поддержка автора
 
@@ -300,6 +319,10 @@ Set `snapshot_index` in `vkcloud_vision.detect_objects` to save and annotate a s
 `max_retries` is the total number of attempts. Face recognition with database updates enabled makes one attempt. An action can return successful results and errors together when only some images or modes fail.
 
 Pass `object_classes: ["person", "cat"]` to filter returned labels and annotations. The filter matches exact English or Russian class names case-insensitively and runs locally after detection. Use **Download diagnostics** on the integration page in Home Assistant for per-camera action counts and timestamps since the last load.
+
+Set `cooldown_sec: 30` to skip overlapping triggers and repeated detections on the same camera for 30 seconds after each detection starts. Skipped calls return `response_type: skipped` before camera capture or a cloud request. Calls with the default value of `0` bypass the interval.
+
+Pass `region: {left: 100, top: 50, right: 800, bottom: 600}` to keep labels whose bounding-box centers fall inside the rectangle, in original image pixels. Use separate calls for cameras that need different regions.
 
 ## Face Recognition
 

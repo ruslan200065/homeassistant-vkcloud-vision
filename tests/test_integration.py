@@ -180,6 +180,7 @@ async def test_home_assistant_action_schema_and_camera_paths(monkeypatch, tmp_pa
         "num_snapshots": 2,
         "snapshot_index": 2,
         "object_classes": [" Person "],
+        "region": {"left": 1, "top": 2, "right": 3, "bottom": 4},
     }
     result = await hass.services.async_call(
         DOMAIN, "detect_objects", data, blocking=True, return_response=True
@@ -192,6 +193,7 @@ async def test_home_assistant_action_schema_and_camera_paths(monkeypatch, tmp_pa
     ]
     assert calls[0].kwargs["snapshot_index"] == 2
     assert calls[0].kwargs["object_classes"] == ["Person"]
+    assert calls[0].kwargs["region"] == (1, 2, 3, 4)
     assert calls[0].kwargs["modes"] == ["multiobject"]
 
     with pytest.raises(HomeAssistantError, match="must not exceed"):
@@ -274,21 +276,43 @@ async def test_entry_reload_restores_image_processing_entity(
 
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
-        result = await hass.services.async_call(
-            DOMAIN,
-            "detect_objects",
-            {"entity_id": "camera.door"},
-            blocking=True,
-            return_response=True,
+        clock = Mock(return_value=100.0)
+        monkeypatch.setattr(
+            "custom_components.vkcloud_vision.image_processing.monotonic", clock
         )
-        assert result["camera.door"]["response_type"] == "action_done"
+
+        async def detect(camera):
+            return (
+                await hass.services.async_call(
+                    DOMAIN,
+                    "detect_objects",
+                    {"entity_id": camera, "cooldown_sec": 30},
+                    blocking=True,
+                    return_response=True,
+                )
+            )[camera]
+
+        first, second = await asyncio.gather(
+            detect("camera.door"), detect("camera.door")
+        )
+        assert {first["response_type"], second["response_type"]} == {
+            "action_done",
+            "skipped",
+        }
+        assert (await detect("camera.yard"))["response_type"] == "action_done"
+        clock.return_value = 130.0
+        assert (await detect("camera.door"))["response_type"] == "action_done"
         assert "T" in hass.states.get(entity_id).state
+
         diagnostics = await async_get_config_entry_diagnostics(hass, entry)
         assert diagnostics["auth_method"] == "api_key"
-        (stats,) = diagnostics["actions_since_load"]
-        assert stats["camera"] == "camera.door"
+        stats = next(
+            item
+            for item in diagnostics["actions_since_load"]
+            if item["camera"] == "camera.door"
+        )
         assert stats["action"] == "detect_objects"
-        assert stats["counts"] == {"action_done": 1}
+        assert stats["counts"] == {"action_done": 2, "skipped": 1}
         assert stats["last_success_at"] == stats["last_completed_at"]
         assert "test" not in str(diagnostics)
     finally:
@@ -313,3 +337,19 @@ def test_object_class_filter_applies_to_response_and_annotations():
     assert result.data["multiobject"][0]["labels"] == [label]
     assert result.labels_for_image("door_1") == [label]
     assert len(body["multiobject"][0]["labels"]) == 3
+
+
+def test_object_region_filters_by_box_center():
+    inside = {"eng": "person", "prob": 0.9, "coord": [0, 0, 20, 20]}
+    outside = {"eng": "person", "prob": 0.9, "coord": [5, 6, 11, 12]}
+    no_box = {"eng": "person", "prob": 0.9}
+    inverted = {"eng": "person", "prob": 0.9, "coord": [15, 5, 5, 15]}
+    response = VKCloudVisionObjectDetectionResponse(
+        {
+            "multiobject": [
+                {"name": "door_1", "labels": [inside, outside, no_box, inverted]}
+            ]
+        },
+        region=(10, 10, 30, 30),
+    )
+    assert response.labels_for_image("door_1") == [inside]

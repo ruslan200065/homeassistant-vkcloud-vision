@@ -20,6 +20,8 @@ CONF_REFRESH_TOKEN = "refresh_token"
 
 ATTR_MODES = "modes"
 ATTR_OBJECT_CLASSES = "object_classes"
+ATTR_COOLDOWN_SEC = "cooldown_sec"
+ATTR_REGION = "region"
 ATTR_PROB_THRESHOLD = "prob_threshold"
 ATTR_LANG = "lang"
 ATTR_FILE_OUT = "file_out"
@@ -91,4 +93,5 @@ class ResponseType(StrEnum):
 
     ACTION_DONE = "action_done"
     ERROR = "error"
+    SKIPPED = "skipped"
     PARTIAL_ACTION_DONE = "partial_action_done"

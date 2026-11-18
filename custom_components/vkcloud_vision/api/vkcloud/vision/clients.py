@@ -23,6 +23,7 @@ class VKCloudVisionObjectsClient(VKCloudVisionBaseClient):
         prob_threshold: float,
         max_retries: int = 3,
         object_classes: list[str] | None = None,
+        region: tuple[int, int, int, int] | None = None,
     ) -> VKCloudVisionObjectDetectionResponse:
         """Detect objects in a photo."""
         meta = {
@@ -36,6 +37,7 @@ class VKCloudVisionObjectsClient(VKCloudVisionBaseClient):
             raw_response=raw_response,
             prob_threshold=prob_threshold,
             object_classes=object_classes,
+            region=region,
         )
 
 
